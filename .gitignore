@@ -1,0 +1,12 @@
+*.o
+*.gcno
+*.gcov
+*.gcda
+*.log
+.deps/
+doc/
+m4/
+scripts/
+t/
+AUTHORS
+ChangeLog
