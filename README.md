@@ -1,4 +1,4 @@
-# add show to memcached
+# Add show to memcached
 このリポジトリでは、slab の中身を出力する命令を追加する。  
   
 今回は「show」という命令を新たに追加し、それを受け取った場合に slab の中身について出力することにした。  
@@ -51,13 +51,14 @@ else if (first == 's')
 	}
 ```
 
-とりあえず、受け取ったことを client 側に伝える形にして実行を行った。  
+とりあえず、受け取ったことを client 側に伝える形にした。  
 
-結果はこんな感じ  
+その後、実行を行った結果はこんな感じ    
+
 client side  
 ```
 show
 show received
 ```
-
+  
 まずは show を認識させられたっぽい。
