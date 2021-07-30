@@ -86,6 +86,39 @@ slabclass_t という構造体で、それぞれの slab を管理しており�
 
 ちなみに、slab.h の関数は memcached.h が include されていれば見れるっぽい。  
 
+まずは、slab.c に以下のように関数を作成  
+```
+/* show slab information */
+/* This function called from proto_text.c */
+void process_show_command(conn *c){
+    int i=0;
+    while (++i < MAX_NUMBER_OF_SLAB_CLASSES - 1)
+    {
+        fprintf(stderr, "slab class %3d: chunk size %9u perslab %7u\n",
+                i, slabclass[i].size, slabclass[i].perslab);
+    }
+}
+```
+
+その後、slab.h に関数のプロトタイプ宣言を追加
+```
+/* show command function that output information about slabs */
+void process_show_command(conn *c);
+```
+
+最後に prot_text.c の show 関数部を変更
+```
+else if (strcmp(tokens[COMMAND_TOKEN].value, "show") == 0)
+        {
+
+            out_string(c, "show received");
+            process_show_command(c);
+        }
+```
+
+さてさてどうなるかと、実行した  
+  
+surver side
 ```
 <28 show
 >28 show received
@@ -153,4 +186,5 @@ slab class  60: chunk size         0 perslab       0
 slab class  61: chunk size         0 perslab       0
 slab class  62: chunk size         0 perslab       0
 ```
-
+  よくよく考えたら -vvv コマンドと同じようにやったら出力される結果は server side だった。
+  出来れば client side に出力させたいが、まあ良しとしよう。
