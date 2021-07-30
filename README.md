@@ -62,3 +62,95 @@ show received
 ```
   
 まずは show を認識させられたっぽい。
+
+## slab class の情報について出力
+次に slab class の情報を出力させてみる。  
+幸い -vvv  コマンドで起動させると以下のような情報が出力される。  
+
+```
+slab class   1: chunk size        96 perslab   10922
+slab class   2: chunk size       120 perslab    8738
+slab class   3: chunk size       152 perslab    6898
+・・・
+```
+  
+ということで、この情報を同じように出力させてみる。  
+  
+memcached では slab についての処理を slab.c というファイルで行っている。  
+slabclass_t という構造体で、それぞれの slab を管理しており、slabclass という配列で
+それぞれの slabclass_t 構造体を管理している。
+この slabclass は slab.c 内でのみ参照可能となっている。  
+  
+そのため、今回は slab.c に process_show_command という関数を実装し、  
+その中で -vvv コマンドのように出力を行わせることにした。  
+
+ちなみに、slab.h の関数は memcached.h が include されていれば見れるっぽい。  
+
+```
+<28 show
+>28 show received
+28: going from conn_parse_cmd to conn_new_cmd
+slab class   1: chunk size        96 perslab   10922
+slab class   2: chunk size       120 perslab    8738
+slab class   3: chunk size       152 perslab    6898
+slab class   4: chunk size       192 perslab    5461
+slab class   5: chunk size       240 perslab    4369
+slab class   6: chunk size       304 perslab    3449
+slab class   7: chunk size       384 perslab    2730
+slab class   8: chunk size       480 perslab    2184
+slab class   9: chunk size       600 perslab    1747
+slab class  10: chunk size       752 perslab    1394
+slab class  11: chunk size       944 perslab    1110
+slab class  12: chunk size      1184 perslab     885
+slab class  13: chunk size      1480 perslab     708
+slab class  14: chunk size      1856 perslab     564
+slab class  15: chunk size      2320 perslab     451
+slab class  16: chunk size      2904 perslab     361
+slab class  17: chunk size      3632 perslab     288
+slab class  18: chunk size      4544 perslab     230
+slab class  19: chunk size      5680 perslab     184
+slab class  20: chunk size      7104 perslab     147
+slab class  21: chunk size      8880 perslab     118
+slab class  22: chunk size     11104 perslab      94
+slab class  23: chunk size     13880 perslab      75
+slab class  24: chunk size     17352 perslab      60
+slab class  25: chunk size     21696 perslab      48
+slab class  26: chunk size     27120 perslab      38
+slab class  27: chunk size     33904 perslab      30
+slab class  28: chunk size     42384 perslab      24
+slab class  29: chunk size     52984 perslab      19
+slab class  30: chunk size     66232 perslab      15
+slab class  31: chunk size     82792 perslab      12
+slab class  32: chunk size    103496 perslab      10
+slab class  33: chunk size    129376 perslab       8
+slab class  34: chunk size    161720 perslab       6
+slab class  35: chunk size    202152 perslab       5
+slab class  36: chunk size    252696 perslab       4
+slab class  37: chunk size    315872 perslab       3
+slab class  38: chunk size    394840 perslab       2
+slab class  39: chunk size    524288 perslab       2
+slab class  40: chunk size         0 perslab       0
+slab class  41: chunk size         0 perslab       0
+slab class  42: chunk size         0 perslab       0
+slab class  43: chunk size         0 perslab       0
+slab class  44: chunk size         0 perslab       0
+slab class  45: chunk size         0 perslab       0
+slab class  46: chunk size         0 perslab       0
+slab class  47: chunk size         0 perslab       0
+slab class  48: chunk size         0 perslab       0
+slab class  49: chunk size         0 perslab       0
+slab class  50: chunk size         0 perslab       0
+slab class  51: chunk size         0 perslab       0
+slab class  52: chunk size         0 perslab       0
+slab class  53: chunk size         0 perslab       0
+slab class  54: chunk size         0 perslab       0
+slab class  55: chunk size         0 perslab       0
+slab class  56: chunk size         0 perslab       0
+slab class  57: chunk size         0 perslab       0
+slab class  58: chunk size         0 perslab       0
+slab class  59: chunk size         0 perslab       0
+slab class  60: chunk size         0 perslab       0
+slab class  61: chunk size         0 perslab       0
+slab class  62: chunk size         0 perslab       0
+```
+

@@ -1340,3 +1340,14 @@ void stop_slab_maintenance_thread(void) {
     /* Wait for the maintenance thread to stop */
     pthread_join(rebalance_tid, NULL);
 }
+
+/* show slab information */
+/* This function called from proto_text.c */
+void process_show_command(conn *c){
+    int i=0;
+    while (++i < MAX_NUMBER_OF_SLAB_CLASSES - 1)
+    {
+        fprintf(stderr, "slab class %3d: chunk size %9u perslab %7u\n",
+                i, slabclass[i].size, slabclass[i].perslab);
+    }
+}

@@ -3171,12 +3171,7 @@ static void process_command(conn *c, char *command)
         {
 
             out_string(c, "show received");
-            // int i=0;
-            // while (++i < MAX_NUMBER_OF_SLAB_CLASSES - 1)
-            // {
-            //     fprintf(stderr, "slab class %3d: chunk size %9u perslab %7u\n",
-            //             i, slabclass[i].size, slabclass[i].perslab);
-            // }
+            process_show_command(c);
         }
         else
         {

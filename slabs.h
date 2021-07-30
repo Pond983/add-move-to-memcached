@@ -69,4 +69,7 @@ void slabs_set_storage(void *arg);
 /* Fixup for restartable code. */
 unsigned int slabs_fixup(char *chunk, const int border);
 
+/* show command function that output information about slabs */
+void process_show_command(conn *c);
+
 #endif
