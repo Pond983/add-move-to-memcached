@@ -5,7 +5,7 @@
   
 ## show 命令の追加
 まず、show 命令を認識させることから始める。  
-show 命令は proto_test.c の process_command という関数で識別を行っている。
+memcached では、命令は proto_test.c の process_command という関数で識別を行っている。
 
 その中で 最初の文字が s となる命令群の中に、show という命令を認識できるよう書き換えた。
 
