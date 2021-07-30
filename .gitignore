@@ -8,5 +8,6 @@ doc/
 m4/
 scripts/
 t/
+.history/
 AUTHORS
 ChangeLog
