@@ -1,53 +1,63 @@
-# Memcached
+# add show to memcached
+このリポジトリでは、slab の中身を出力する命令を追加する。  
+  
+今回は「show」という命令を新たに追加し、それを受け取った場合に slab の中身について出力することにした。  
+  
+## show 命令の追加
+まず、show 命令を認識させることから始める。  
+show 命令は proto_test.c の process_command という関数で識別を行っている。
 
-Memcached is a high performance multithreaded event-based key/value cache
-store intended to be used in a distributed system.
+その中で 最初の文字が s となる命令群の中に、show という命令を認識できるよう書き換えた。
 
-See: https://memcached.org/about
+```
+else if (first == 's')
+    {
+        if (strcmp(tokens[COMMAND_TOKEN].value, "set") == 0 && (comm = NREAD_SET))
+        {
 
-A fun story explaining usage: https://memcached.org/tutorial
+            WANT_TOKENS_OR(ntokens, 6, 7);
+            process_update_command(c, tokens, ntokens, comm, false);
+        }
+        else if (strcmp(tokens[COMMAND_TOKEN].value, "stats") == 0)
+        {
 
-If you're having trouble, try the wiki: https://memcached.org/wiki
+            process_stat(c, tokens, ntokens);
+        }
+        else if (strcmp(tokens[COMMAND_TOKEN].value, "shutdown") == 0)
+        {
 
-If you're trying to troubleshoot odd behavior or timeouts, see:
-https://memcached.org/timeouts
+            process_shutdown_command(c, tokens, ntokens);
+        }
+        else if (strcmp(tokens[COMMAND_TOKEN].value, "slabs") == 0)
+        {
 
-https://memcached.org/ is a good resource in general. Please use the mailing
-list to ask questions, github issues aren't seen by everyone!
+            process_slabs_command(c, tokens, ntokens);
+        }
+        else if (strcmp(tokens[COMMAND_TOKEN].value, "show") == 0)
+        {
 
-## Dependencies
+            out_string(c, "show received");
+            // int i=0;
+            // while (++i < MAX_NUMBER_OF_SLAB_CLASSES - 1)
+            // {
+            //     fprintf(stderr, "slab class %3d: chunk size %9u perslab %7u\n",
+            //             i, slabclass[i].size, slabclass[i].perslab);
+            // }
+        }
+        else
+        {
+            out_string(c, "ERROR");
+        }
+	}
+```
 
-* libevent, https://www.monkey.org/~provos/libevent/ (libevent-dev)
-* libseccomp, (optional, experimental, linux) - enables process restrictions for
-  better security. Tested only on x86-64 architectures.
-* openssl, (optional) - enables TLS support. need relatively up to date
-  version.
+とりあえず、受け取ったことを client 側に伝える形にして実行を行った。  
 
-## Environment
+結果はこんな感じ  
+client side  
+```
+show
+show received
+```
 
-Be warned that the -k (mlockall) option to memcached might be
-dangerous when using a large cache.  Just make sure the memcached machines
-don't swap.  memcached does non-blocking network I/O, but not disk.  (it
-should never go to disk, or you've lost the whole point of it)
-
-## Build status
-
-See https://build.memcached.org/ for multi-platform regression testing status.
-
-## Bug reports
-
-Feel free to use the issue tracker on github.
-
-**If you are reporting a security bug** please contact a maintainer privately.
-We follow responsible disclosure: we handle reports privately, prepare a
-patch, allow notifications to vendor lists. Then we push a fix release and your
-bug can be posted publicly with credit in our release notes and commit
-history.
-
-## Website
-
-* https://www.memcached.org
-
-## Contributing
-
-See https://github.com/memcached/memcached/wiki/DevelopmentRepos
+まずは show を認識させられたっぽい。
