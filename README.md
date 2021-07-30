@@ -186,5 +186,95 @@ slab class  60: chunk size         0 perslab       0
 slab class  61: chunk size         0 perslab       0
 slab class  62: chunk size         0 perslab       0
 ```
-  よくよく考えたら -vvv コマンドと同じようにやったら出力される結果は server side だった。
-  出来れば client side に出力させたいが、まあ良しとしよう。
+よくよく考えたら -vvv コマンドと同じようにやったら出力される結果は server side だった。  
+出来れば client side に出力させたいが、まあ良しとしよう。  
+
+## slab 内のデータを出力
+さて、ここまで来たらそれぞれの slab の中身を slab の個数分出力させればいけそうだ。  
+
+ということで、process_get_command と同じように item のデータの出力を行わせてみるとしよう  
+  
+process_show_command の中身を以下のように書き換えてみた
+```
+void process_show_command(conn *c)
+{
+    int i = 0;
+    slabclass_t *p;
+    item *it;
+    mc_resp *resp = c->resp;
+
+    while (++i < MAX_NUMBER_OF_SLAB_CLASSES - 1)
+    {
+        fprintf(stderr, "slab class %3d: chunk size %9u perslab %7u\n",
+                i, slabclass[i].size, slabclass[i].perslab);
+
+        p = &slabclass[i];
+        it = (item *)p->slots;
+        for (int j = 0; j < p->slabs; j++)
+        {
+            // fprintf(stderr, "item%d, key: %s, value: %s\n", j, ITEM_key(it), ITEM_data(it));
+            MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
+                                  it->nbytes, ITEM_get_cas(it));
+            // int nbytes = it->nbytes;
+            ;
+            // nbytes = it->nbytes;
+            char *p = resp->wbuf;
+            memcpy(p, "VALUE ", 6);
+            p += 6;
+            memcpy(p, ITEM_key(it), it->nkey);
+            p += it->nkey;
+            fprintf(stderr, "resp->wbuf: %s\n", resp->wbuf);
+            // p += make_ascii_get_suffix(p, it, false, nbytes);
+            resp_add_iov(resp, resp->wbuf, p - resp->wbuf);
+        }
+    }
+}
+```
+
+若干分かりずらくなってしまったが、おそらく ITEM_key が item の key 情報を入手する macro であると予想  
+試しに 4byte のデータを入れて出力してみた。  
+実行した結果
+```
+slab class   1: chunk size        96 perslab   10922
+resp->wbuf: VALUE
+```
+おろ??  
+使い方が違うのかもしれない。  
+試しに get コマンドのほうでも出力を行わせた。  
+  
+process_get_command を以下のように書き換えた
+```
+if (it)
+            {
+                /*
+                 * Construct the response. Each hit adds three elements to the
+                 * outgoing data list:
+                 *   "VALUE "
+                 *   key
+                 *   " " + flags + " " + data length + "\r\n" + data (with \r\n)
+                 */
+
+                {
+                    MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
+                                          it->nbytes, ITEM_get_cas(it));
+                    int nbytes = it->nbytes;
+                    ;
+                    nbytes = it->nbytes;
+                    char *p = resp->wbuf;
+                    memcpy(p, "VALUE ", 6);
+                    p += 6;
+                    memcpy(p, ITEM_key(it), it->nkey);
+                    fprintf(stderr, "resp->wbuf: %s\n", resp->wbuf); ===> stderr に buffer の中身を出力させてみる
+                    p += it->nkey;
+                    p += make_ascii_get_suffix(p, it, return_cas, nbytes);
+                    fprintf(stderr, "resp->wbuf: %s\n", resp->wbuf); ===> stderr に buffer の中身を出力させてみる
+                    resp_add_iov(resp, resp->wbuf, p - resp->wbuf);
+```
+
+さて、実行結果は…
+```
+resp->wbuf: VALUE hoge
+resp->wbuf: VALUE hoge 0 4
+```
+
+なぬ????
