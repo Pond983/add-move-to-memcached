@@ -2,7 +2,8 @@
 このリポジトリでは、slab の中身を出力する命令を追加する。  
   
 今回は「show」という命令を新たに追加し、それを受け取った場合に slab の中身について出力することにした。  
-  
+
+***
 ## show 命令の追加
 まず、show 命令を認識させることから始める。  
 memcached では、命令は proto_test.c の process_command という関数で識別を行っている。
@@ -63,6 +64,7 @@ show received
   
 まずは show を認識させられたっぽい。
 
+***
 ## slab class の情報について出力
 次に slab class の情報を出力させてみる。  
 幸い -vvv  コマンドで起動させると以下のような情報が出力される。  
@@ -189,6 +191,7 @@ slab class  62: chunk size         0 perslab       0
 よくよく考えたら -vvv コマンドと同じようにやったら出力される結果は server side だった。  
 出来れば client side に出力させたいが、まあ良しとしよう。  
 
+***
 ## slab 内のデータを出力
 さて、ここまで来たらそれぞれの slab の中身を slab の個数分出力させればいけそうだ。  
 
@@ -278,3 +281,242 @@ resp->wbuf: VALUE hoge 0 4
 ```
 
 なぬ????
+***
+### LRU algorithm を応用する
+slab class 内に item が存在しているが、slab->slots の先に順番に入っているわけではない様子。  
+おそらく、
+
+* key から item を入手する(get) -> hash から
+* item の移動 -> LRU の list の中でポインタをつなぎなおす
+
+という形になっているために、そもそも 「slabclass を使って item を管理する」 必要がないのだろう。  
+そのため、特定の slab に所属する lru の中身を見ることで slab の中身を全て出力させてみることにした。 
+  
+item が来た際に、list に格納する関数である *do_item_link_q* 関数では以下のように item を格納している。
+```
+static void do_item_link_q(item *it)
+{ /* item is the new head */
+    item **head, **tail;
+    assert((it->it_flags & ITEM_SLABBED) == 0);
+
+    head = &heads[it->slabs_clsid];
+    tail = &tails[it->slabs_clsid];
+    assert(it != *head);
+    assert((*head && *tail) || (*head == 0 && *tail == 0));
+    it->prev = 0;
+    it->next = *head;
+    if (it->next)
+        it->next->prev = it;
+    *head = it;
+    if (*tail == 0)
+        *tail = it;
+    sizes[it->slabs_clsid]++;
+```
+この関数では、list の先頭から item を格納している。  
+また、if 分から察するに、list が空の時の tail の初期値は 0 になっている。  
+  
+  
+次に、item がどの LRU に所属しているのかを確認する。  
+item -> clsid の中身を適当なデータを格納させて、確認した。
+
+とりあえず、process_get_commandを以下のように書き換えた。
+```
+if (it)
+            {
+                /*
+                 * Construct the response. Each hit adds three elements to the
+                 * outgoing data list:
+                 *   "VALUE "
+                 *   key
+                 *   " " + flags + " " + data length + "\r\n" + data (with \r\n)
+                 */
+
+                {
+                    fprintf(stderr, "item address: %p\n", (void *)it); ===> item のアドレスを出力させる
+                    fprintf(stderr, "it->slabs_clsid: %d\n", ITEM_clsid(it)); ===> class id を出力させる
+                    MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
+                                          it->nbytes, ITEM_get_cas(it));
+                    int nbytes = it->nbytes;
+                    ;
+                    nbytes = it->nbytes;
+                    char *p = resp->wbuf;
+                    memcpy(p, "VALUE ", 6);
+                    p += 6;
+                    memcpy(p, ITEM_key(it), it->nkey);
+                    fprintf(stderr, "resp->wbuf: %s\n", resp->wbuf);
+                    p += it->nkey;
+                    p += make_ascii_get_suffix(p, it, return_cas, nbytes);
+                    fprintf(stderr, "resp->wbuf: %s\n", resp->wbuf);
+                    resp_add_iov(resp, resp->wbuf, p - resp->wbuf);
+```
+この状態で、適当なデータを格納して get command を使用した結果、次の通りになった.
+```
+item address: 0x7f5aa9ffaf70
+it->slabs_clsid: 1
+resp->wbuf: VALUE hoge3
+resp->wbuf: VALUE hoge3 0 5
+```
+おそらく、clsid が 1 ということは、slabclass が 1 番目の中の、HOT_LRU (0) に所属しているということだと思われる。  
+
+ということで、slabclass を確認していき、slabs の値が 1 のものだけ、LRU の中身を出力させるように改造することにした。  
+ただし、LRU ようの heads & tails 配列は item.c 内でしか参照できないので、 item.c 内に、*lru_show* 関数を作成し、LRU の中身を出力させることにした。
+
+作成した関数は次のとおりである。
+```
+// show each lru contents
+void lru_show(int slab_id, int item_num)
+{
+    item *it;
+    if (tails[slab_id + HOT_LRU] != 0)
+    {
+        fprintf(stderr, "HOT: \n");
+        it = heads[slab_id + HOT_LRU];
+        while (it != tails[slab_id + HOT_LRU]) 
+        {
+            fprintf(stderr, "\tkey: %s,\tvalue: %s\n", ITEM_key(it), ITEM_data(it));
+            it = it->next;
+        } 
+        fprintf(stderr, "\tkey: %s,\tvalue: %s\n", ITEM_key(it), ITEM_data(it));
+    }
+
+    if (tails[slab_id + WARM_LRU] != 0)
+    {
+        fprintf(stderr, "WARM: \n");
+        it = heads[slab_id + WARM_LRU];
+        while (it != tails[slab_id + WARM_LRU]) 
+        {
+            fprintf(stderr, "\tkey: %s,\tvalue: %s\n", ITEM_key(it), ITEM_data(it));
+            it = it->next;
+        } 
+        fprintf(stderr, "\tkey: %s,\tvalue: %s\n", ITEM_key(it), ITEM_data(it));
+    }
+    
+    if (tails[slab_id + COLD_LRU] != 0)
+    {
+        fprintf(stderr, "COLD: \n");
+        it = heads[slab_id + COLD_LRU];
+        while (it != tails[slab_id + COLD_LRU]) 
+        {
+            fprintf(stderr, "\tkey: %s,\tvalue: %s\n", ITEM_key(it), ITEM_data(it));
+            it = it->next;
+        } 
+        fprintf(stderr, "\tkey: %s,\tvalue: %s\n", ITEM_key(it), ITEM_data(it));
+    }
+}
+```
+本当は、冗長な関数ではなく、for 文とか使って簡潔に書いたほうがかっこいいのだろうが、分かりやすくするために、あえて冗長に書いている。  
+本当に、あえてだ…  
+
+このように作成した後に process_show_command 関数 (slabs.c)も次のように書き換えた。
+```
+/* show slab information */
+/* This function called from proto_text.c */
+void process_show_command(conn *c)
+{
+    int i = 0;
+
+    while (++i < MAX_NUMBER_OF_SLAB_CLASSES - 1)
+    {
+        // output slabclass information like -vvv command
+        fprintf(stderr, "slab class %3d: chunk size %9u perslab %7u\tslabs %u\n",
+                i, slabclass[i].size, slabclass[i].perslab, slabclass[i].slabs);
+
+
+        // if the slabclass has items, output item key and data.
+        if (slabclass[i].slabs > 0){
+            lru_show(i, slabclass[i].slabs);
+        }
+        
+    }
+}
+```
+このようにした後で、とりあえず実行してみた。
+```
+slab class   1: chunk size        96 perslab   10922    slabs 1
+COLD:
+        key: hoge,      value: fuga
+
+slab class   2: chunk size       120 perslab    8738    slabs 0
+slab class   3: chunk size       152 perslab    6898    slabs 0
+slab class   4: chunk size       192 perslab    5461    slabs 0
+slab class   5: chunk size       240 perslab    4369    slabs 0
+slab class   6: chunk size       304 perslab    3449    slabs 0
+slab class   7: chunk size       384 perslab    2730    slabs 0
+slab class   8: chunk size       480 perslab    2184    slabs 0
+slab class   9: chunk size       600 perslab    1747    slabs 1
+COLD:
+        key: abc,       value: abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd
+
+slab class  10: chunk size       752 perslab    1394    slabs 0
+slab class  11: chunk size       944 perslab    1110    slabs 0
+slab class  12: chunk size      1184 perslab     885    slabs 1
+COLD:
+        key: 123,       value: abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd
+
+slab class  13: chunk size      1480 perslab     708    slabs 0
+slab class  14: chunk size      1856 perslab     564    slabs 0
+slab class  15: chunk size      2320 perslab     451    slabs 0
+slab class  16: chunk size      2904 perslab     361    slabs 0
+slab class  17: chunk size      3632 perslab     288    slabs 0
+slab class  18: chunk size      4544 perslab     230    slabs 0
+slab class  19: chunk size      5680 perslab     184    slabs 0
+slab class  20: chunk size      7104 perslab     147    slabs 0
+slab class  21: chunk size      8880 perslab     118    slabs 0
+slab class  22: chunk size     11104 perslab      94    slabs 0
+slab class  23: chunk size     13880 perslab      75    slabs 0
+slab class  24: chunk size     17352 perslab      60    slabs 0
+slab class  25: chunk size     21696 perslab      48    slabs 0
+slab class  26: chunk size     27120 perslab      38    slabs 0
+slab class  27: chunk size     33904 perslab      30    slabs 0
+slab class  28: chunk size     42384 perslab      24    slabs 0
+slab class  29: chunk size     52984 perslab      19    slabs 0
+slab class  30: chunk size     66232 perslab      15    slabs 0
+slab class  31: chunk size     82792 perslab      12    slabs 0
+slab class  32: chunk size    103496 perslab      10    slabs 0
+slab class  33: chunk size    129376 perslab       8    slabs 0
+slab class  34: chunk size    161720 perslab       6    slabs 0
+slab class  35: chunk size    202152 perslab       5    slabs 0
+slab class  36: chunk size    252696 perslab       4    slabs 0
+slab class  37: chunk size    315872 perslab       3    slabs 0
+slab class  38: chunk size    394840 perslab       2    slabs 0
+slab class  39: chunk size    524288 perslab       2    slabs 0
+slab class  40: chunk size         0 perslab       0    slabs 0
+slab class  41: chunk size         0 perslab       0    slabs 0
+slab class  42: chunk size         0 perslab       0    slabs 0
+slab class  43: chunk size         0 perslab       0    slabs 0
+slab class  44: chunk size         0 perslab       0    slabs 0
+slab class  45: chunk size         0 perslab       0    slabs 0
+slab class  46: chunk size         0 perslab       0    slabs 0
+slab class  47: chunk size         0 perslab       0    slabs 0
+slab class  48: chunk size         0 perslab       0    slabs 0
+slab class  49: chunk size         0 perslab       0    slabs 0
+slab class  50: chunk size         0 perslab       0    slabs 0
+slab class  51: chunk size         0 perslab       0    slabs 0
+slab class  52: chunk size         0 perslab       0    slabs 0
+slab class  53: chunk size         0 perslab       0    slabs 0
+slab class  54: chunk size         0 perslab       0    slabs 0
+slab class  55: chunk size         0 perslab       0    slabs 0
+slab class  56: chunk size         0 perslab       0    slabs 0
+slab class  57: chunk size         0 perslab       0    slabs 0
+slab class  58: chunk size         0 perslab       0    slabs 0
+slab class  59: chunk size         0 perslab       0    slabs 0
+slab class  60: chunk size         0 perslab       0    slabs 0
+slab class  61: chunk size         0 perslab       0    slabs 0
+slab class  62: chunk size         0 perslab       0    slabs 0
+```
+適当にデータを突っ込んで、データを吐き出させてみた。  
+結果、ITEM_key などもうまく機能し、key と value を出力させることに成功した。
+
+***
+### 考察
+ただし、get で出力させたときに HOT 領域にいるのに、COLD 領域で出力されることがあった。
+```
+COLD:
+        key: hoge,      value: fuga
+...
+it->slabs_clsid: 1 ===> COLD 領域にいるなら 129 になるはず (COLD_LRU(128) + slabclass_id(1) = 129)
+resp->wbuf: VALUE hoge
+resp->wbuf: VALUE hoge 0 4
+```
+おそらく、get コマンドで呼ばれた瞬間に HOT LRU に移動し、show コマンドを起動させるまでの間に COLD  領域に移動してしまっているためだと思われる。  
+思われはするが、maintainer スレッドを見つけて、その動作中や動作後の挙動などを吐き出させるようにすれば、その実態が分かるかも。
