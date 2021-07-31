@@ -84,3 +84,5 @@ void lru_maintainer_pause(void);
 void lru_maintainer_resume(void);
 
 void *lru_bump_buf_create(void);
+
+void lru_show(int slab_id, int item_num);

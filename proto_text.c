@@ -574,6 +574,8 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
                  */
 
                 {
+                    fprintf(stderr, "item address: %p\n", (void *)it);
+                    fprintf(stderr, "it->slabs_clsid: %d\n", ITEM_clsid(it));
                     MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
                                           it->nbytes, ITEM_get_cas(it));
                     int nbytes = it->nbytes;
@@ -583,8 +585,10 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
                     memcpy(p, "VALUE ", 6);
                     p += 6;
                     memcpy(p, ITEM_key(it), it->nkey);
+                    fprintf(stderr, "resp->wbuf: %s\n", resp->wbuf);
                     p += it->nkey;
                     p += make_ascii_get_suffix(p, it, return_cas, nbytes);
+                    fprintf(stderr, "resp->wbuf: %s\n", resp->wbuf);
                     resp_add_iov(resp, resp->wbuf, p - resp->wbuf);
 
 #ifdef EXTSTORE
