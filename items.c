@@ -356,6 +356,7 @@ item *do_item_alloc(char *key, const size_t nkey, const unsigned int flags,
         id |= COLD_LRU;
     }
     it->slabs_clsid = id;
+    fprintf(stderr, "(do_item_alloc)it->slabs_clsid: %d\n", it->slabs_clsid);
 
     DEBUG_REFCNT(it, '*');
     it->it_flags |= settings.use_cas ? ITEM_CAS : 0;

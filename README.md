@@ -508,7 +508,7 @@ slab class  62: chunk size         0 perslab       0    slabs 0
 結果、ITEM_key などもうまく機能し、key と value を出力させることに成功した。
 
 ***
-### 考察
+### 考察1 get の時は HOT で、show の時は COLD ??
 ただし、get で出力させたときに HOT 領域にいるのに、COLD 領域で出力されることがあった。
 ```
 COLD:
@@ -521,3 +521,75 @@ resp->wbuf: VALUE hoge 0 4
 おそらく、get コマンドで呼ばれた瞬間に HOT LRU に移動し、show コマンドを起動させるまでの間に COLD  領域に移動してしまっているためだと思われる。  
 思われはするが、maintainer スレッドを見つけて、その動作中や動作後の挙動などを吐き出させるようにすれば、その実態が分かるかも。  
 もしくは、関数自体が HOT 領域に移送しているのかも
+
+***
+### 考察1について
+出力させている値をしっかり確認すると、get コマンド時に出力させる値に誤りがあった。  
+今まで 「ITEM_clsid(it)」の値を出力させていたが、これは item がどの slab に所属しているかを示したものであり、  
+正しくは 「it->slab_clsid」と書くべきであった。
+(でもこれ分かりずらい気がする…。slab_clsid は lru の情報も内包したもので、ITEM_clsid は slab の情報だけって…。)  
+  
+とにもかくにも、これで正しい clsid 情報が分かる。
+
+```
+it->ITEM_clsid(it): 1
+it->slabs_clsid: 129
+resp->wbuf: VALUE hoge2
+resp->wbuf: VALUE hoge2 0 5
+
+slab class   1: chunk size        96 perslab   10922    slabs 1
+COLD:
+        key: hoge2,     value: fuga2
+```
+
+とりあえず、どちらも COLD 領域にいることを示してくれたので、これで整合性はとれた。
+
+ただ…、あれ??  
+最初は HOT 領域に入るんじゃないの??
+
+ということで、set 時に HOT 領域に入っているか確認。  
+*do_item_alloc* 関数で新規アイテムを LRU に突っ込んでいるとのことなので、
+その部分を書き換えて、HOT 領域に入っているかを確認して見る。
+```
+/* Items are initially loaded into the HOT_LRU. This is '0' but I want at
+     * least a note here. Compiler (hopefully?) optimizes this out.
+     */
+    if (settings.temp_lru &&
+        exptime - current_time <= settings.temporary_ttl)
+    {
+        id |= TEMP_LRU;
+    }
+    else if (settings.lru_segmented)
+    {
+        id |= HOT_LRU;
+    }
+    else
+    {
+        /* There is only COLD in compat-mode */
+        id |= COLD_LRU;
+    }
+    it->slabs_clsid = id;
+    fprintf(stderr, "(do_item_alloc)it->slabs_clsid: %d\n", it->slabs_clsid);
+```
+こんな感じで、最後の最後に clsid がどこに設定されているかを出力するようにした。
+この状態で、set コマンドを使用すると
+```
+(do_item_alloc)it->slabs_clsid: 1
+item address: 0x7f374d0d0f70
+it->ITEM_clsid(it): 1
+it->slabs_clsid: 129
+resp->wbuf: VALUE hoge
+resp->wbuf: VALUE hoge 0 4
+```
+どうやら、set コマンドを使用したときには HOT 領域に入っているようだが、
+その後 get コマンドを行うまでの間に COLD 領域に移送させられてるっぽい…。  
+
+つまり、
+* set された item は HOT 領域に所属する
+* ただし、一瞬で maintainer thread (?) などによって、COLD 領域に突っ込まれる
+* 結果、すぐに get や show コマンドを使用しても COLD 領域に入っている item しか確認できない。
+
+ということだと、思われる。
+
+これを調べるなら…、maintainer thread を止めるか、移送の際に出力をさせるようにすればよさそうだ。  
+ということで、次は maintainer thread の動きについて調べてみようと思う。

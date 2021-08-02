@@ -575,7 +575,8 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
 
                 {
                     fprintf(stderr, "item address: %p\n", (void *)it);
-                    fprintf(stderr, "it->slabs_clsid: %d\n", ITEM_clsid(it));
+                    fprintf(stderr, "it->ITEM_clsid(it): %d\n", ITEM_clsid(it));
+                    fprintf(stderr, "it->slabs_clsid: %d\n", it->slabs_clsid);
                     MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
                                           it->nbytes, ITEM_get_cas(it));
                     int nbytes = it->nbytes;
