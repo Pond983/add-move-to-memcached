@@ -383,7 +383,6 @@ item *do_item_alloc(char *key, const size_t nkey, const unsigned int flags,
         chunk->orig_clsid = hdr_id;
     }
     it->h_next = 0;
-
     return it;
 }
 
@@ -683,6 +682,7 @@ char *item_cachedump(const unsigned int slabs_clsid, const unsigned int limit, u
     char key_temp[KEY_MAX_LENGTH + 1];
     char temp[512];
     unsigned int id = slabs_clsid;
+    
     id |= COLD_LRU;
 
     pthread_mutex_lock(&lru_locks[id]);
@@ -1427,9 +1427,11 @@ int lru_pull_tail(const int orig_id, const int cur_lru,
     {
         if (move_to_lru)
         {
+            fprintf(stderr, "In lru_pull_tail before:\tkey: %s,\tvalue: %s,\tit->slabs_clsid: %d\n", ITEM_key(it), ITEM_data(it), it->slabs_clsid);
             it->slabs_clsid = ITEM_clsid(it);
             it->slabs_clsid |= move_to_lru;
             item_link_q(it);
+            fprintf(stderr, "In lru_pull_tail after:\tkey: %s,\tvalue: %s,\tit->slabs_clsid: %d\n", ITEM_key(it), ITEM_data(it), it->slabs_clsid);
         }
         if ((flags & LRU_PULL_RETURN_ITEM) == 0)
         {
@@ -1582,6 +1584,9 @@ static int lru_maintainer_juggle(const int slabs_clsid)
     int did_moves = 0;
     uint64_t total_bytes = 0;
     unsigned int chunks_perslab = 0;
+    // if(slabs_clsid == 1){
+    //     fprintf(stderr, "lru_maintainer_juggle is called\n");
+    // }
     //unsigned int chunks_free = 0;
     /* TODO: if free_chunks below high watermark, increase aggressiveness */
     slabs_available_chunks(slabs_clsid, NULL,

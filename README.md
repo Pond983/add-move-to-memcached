@@ -593,3 +593,40 @@ resp->wbuf: VALUE hoge 0 4
 
 これを調べるなら…、maintainer thread を止めるか、移送の際に出力をさせるようにすればよさそうだ。  
 ということで、次は maintainer thread の動きについて調べてみようと思う。
+
+***
+### cold 領域への移動部分
+lru_maintainer thread で移送を行っていることは分かっている。  
+プログラムを追っていくと、item.c の *lru_pull_tail* 関数で移送が行われていそうなことが分かった。  
+該当部は以下のようになっている。
+```
+if (move_to_lru)
+        {
+            fprintf(stderr, "In lru_pull_tail before:\tkey: %s,\tvalue: %s,\tit->slabs_clsid: %d\n", ITEM_key(it), ITEM_data(it), it->slabs_clsid);
+            it->slabs_clsid = ITEM_clsid(it);
+            it->slabs_clsid |= move_to_lru;
+            item_link_q(it);
+            fprintf(stderr, "In lru_pull_tail after:\tkey: %s,\tvalue: %s,\tit->slabs_clsid: %d\n", ITEM_key(it), ITEM_data(it), it->slabs_clsid);
+        }
+```
+*move_to_url* に移送先の url が指定されており、指定された item の link をつなぎなおすことで実装を行っている様子。  
+そのため、今までと同じように出力させてあげると次のようになった。
+```
+(do_item_alloc)it->slabs_clsid: 1
+In lru_pull_tail before:        key: hoge,      value: fuga
+,       it->slabs_clsid: 1
+In lru_pull_tail after: key: hoge,      value: fuga
+,       it->slabs_clsid: 129
+(do_item_alloc)it->slabs_clsid: 1
+In lru_pull_tail before:        key: hoge2,     value: fuga2
+,       it->slabs_clsid: 1
+In lru_pull_tail after: key: hoge2,     value: fuga2
+,       it->slabs_clsid: 129
+(do_item_alloc)it->slabs_clsid: 1
+In lru_pull_tail before:        key: hoge3,     value: fuga3
+,       it->slabs_clsid: 1
+In lru_pull_tail after: key: hoge3,     value: fuga3
+,       it->slabs_clsid: 129
+```
+なぜだか変な部分で改行されているが、set 後にすぐ COLD 領域へ移送されていることが分かる。  
+このため、set されてすぐ lru_maintainer で移送されていることが確認することが出来た。
