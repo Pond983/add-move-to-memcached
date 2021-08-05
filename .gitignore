@@ -3,11 +3,14 @@
 *.gcov
 *.gcda
 *.log
+*.d
 .deps/
 doc/
 m4/
 scripts/
 t/
 .history/
+.vscode/
+autom4te.cache/
 AUTHORS
 ChangeLog
