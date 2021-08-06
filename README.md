@@ -630,3 +630,159 @@ In lru_pull_tail after: key: hoge3,     value: fuga3
 ```
 なぜだか変な部分で改行されているが、set 後にすぐ COLD 領域へ移送されていることが分かる。  
 このため、set されてすぐ lru_maintainer で移送されていることが確認することが出来た。
+
+***
+### HOT, WAEM, COLD の基準について
+*lru_pull_tail* 関数のソースコードを呼んでいった結果、どのように 3 つの領域に分かれているかの目星がついた。
+* HOT : maintainer thread が slabclass を確認するまでに、set 命令が行われている item
+* WARM : maintainer thread が slabclass を確認するまでに、get もしくは touch が 2 回以上行われている
+* COLD : maintainer thread が slabclass を確認するまでに、set が行われず、get や touch が 1 回未満しか行われない
+
+次に該当するプログラム部分を確認してみる。
+```
+switch (cur_lru)
+        {
+        case HOT_LRU:
+            limit = total_bytes * settings.hot_lru_pct / 100;
+        case WARM_LRU:
+            if (limit == 0)
+                limit = total_bytes * settings.warm_lru_pct / 100;
+            /* Rescue ACTIVE items aggressively */
+            if ((search->it_flags & ITEM_ACTIVE) != 0)  
+            {
+                search->it_flags &= ~ITEM_ACTIVE;
+                removed++;
+                if (cur_lru == WARM_LRU)
+                {
+                    itemstats[id].moves_within_lru++;           ====>  WARM -> WARM : WARM_LRU の 先頭に??
+                    do_item_unlink_q(search);
+                    do_item_link_q(search);
+                    do_item_remove(search);
+                    item_trylock_unlock(hold_lock);
+                }
+                else
+                {
+                    /* Active HOT_LRU items flow to WARM */
+                    itemstats[id].moves_to_warm++;              ====> HOT -> WARM : ACTIVE bit が立っている
+                    move_to_lru = WARM_LRU;
+                    do_item_unlink_q(search);
+                    it = search;
+                }
+            }
+            else if (sizes_bytes[id] > limit ||
+                     current_time - search->time > max_age)
+            {
+                itemstats[id].moves_to_cold++;                  ====> HOT or WARM -> COLD : ACTIVE bit が立っていない
+                move_to_lru = COLD_LRU;
+                do_item_unlink_q(search);
+                it = search;
+                removed++;
+                break;
+            }
+            else
+            {
+                /* Don't want to move to COLD, not active, bail out */
+                it = search;
+            }
+            break;
+        case COLD_LRU:
+            it = search; /* No matter what, we're stopping */
+            if (flags & LRU_PULL_EVICT)
+            {                                                    ====> COLD 領域から削除する
+                if (settings.evict_to_free == 0)
+                {
+                    /* Don't think we need a counter for this. It'll OOM.  */
+                    break;
+                }
+                itemstats[id].evicted++;
+                itemstats[id].evicted_time = current_time - search->time;
+                if (search->exptime != 0)
+                    itemstats[id].evicted_nonzero++;
+                if ((search->it_flags & ITEM_FETCHED) == 0)
+                {
+                    itemstats[id].evicted_unfetched++;
+                }
+                if ((search->it_flags & ITEM_ACTIVE))
+                {
+                    itemstats[id].evicted_active++;
+                }
+                LOGGER_LOG(NULL, LOG_EVICTIONS, LOGGER_EVICTION, search);
+                STORAGE_delete(ext_storage, search);
+                do_item_unlink_nolock(search, hv);
+                removed++;
+                if (settings.slab_automove == 2)
+                {
+                    slabs_reassign(-1, orig_id);
+                }
+            }
+            else if (flags & LRU_PULL_RETURN_ITEM)
+            {
+                /* Keep a reference to this item and return it. */
+                ret_it->it = it;
+                ret_it->hv = hv;
+            }
+            else if ((search->it_flags & ITEM_ACTIVE) != 0 && settings.lru_segmented)
+            {                                                      ====> COLD -> WARM : ACTIVE なら WARM 領域に 
+                itemstats[id].moves_to_warm++;
+                search->it_flags &= ~ITEM_ACTIVE;
+                move_to_lru = WARM_LRU;
+                do_item_unlink_q(search);
+                removed++;
+            }
+            break;
+        case TEMP_LRU:
+            it = search; /* Kill the loop. Parent only interested in reclaims */
+            break;
+        }
+        if (it != NULL)
+            break;
+    }
+```
+このように、item の状態によって領域を移動するようなプログラムになっている。  
+
+また、ACTIVE bit については次のようになっている。
+```
+// Requires lock held for item.
+// Split out of do_item_get() to allow mget functions to look through header
+// data before losing state modified via the bump function.
+void do_item_bump(conn *c, item *it, const uint32_t hv)
+{
+    /* We update the hit markers only during fetches.
+     * An item needs to be hit twice overall to be considered
+     * ACTIVE, but only needs a single hit to maintain activity
+     * afterward.
+     * FETCHED tells if an item has ever been active.
+     */
+    if (settings.lru_segmented)
+    {
+        if ((it->it_flags & ITEM_ACTIVE) == 0)
+        {
+            if ((it->it_flags & ITEM_FETCHED) == 0)
+            {
+                it->it_flags |= ITEM_FETCHED;               ====> 1 回目の get や touch が行われると FEATCHED に
+            }
+            else
+            {
+                it->it_flags |= ITEM_ACTIVE;                ====> 2 回目の get や touch が行われると ACTIVE に
+                if (ITEM_lruid(it) != COLD_LRU)
+                {
+                    it->time = current_time; // only need to bump time.
+                }
+                else if (!lru_bump_async(c->thread->lru_bump_buf, it, hv))
+                {
+                    // add flag before async bump to avoid race.
+                    it->it_flags &= ~ITEM_ACTIVE;
+                }
+            }
+        }
+    }
+    else
+    {
+        it->it_flags |= ITEM_FETCHED;
+        do_item_update(it);
+    }
+}
+```
+この *do_item_bump* 関数は get や touch 命令をしたときに呼び出される。  
+
+これら 2 つのプログラムから、maintainer thread が回ってくるまでに set や get などが行われるかで領域の移送が行われる。
