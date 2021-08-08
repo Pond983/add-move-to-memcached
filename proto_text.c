@@ -3333,6 +3333,10 @@ static void process_command(conn *c, char *command)
         process_refresh_certs_command(c, tokens, ntokens);
 #endif
     }
+    else if (strcmp(tokens[COMMAND_TOKEN].value, "move") == 0)
+    {
+        out_string(c, "move received");
+    }
     else
     {
         if (strncmp(tokens[ntokens - 2].value, "HTTP/", 5) == 0)
