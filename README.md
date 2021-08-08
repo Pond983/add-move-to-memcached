@@ -786,3 +786,91 @@ void do_item_bump(conn *c, item *it, const uint32_t hv)
 この *do_item_bump* 関数は get や touch 命令をしたときに呼び出される。  
 
 これら 2 つのプログラムから、maintainer thread が回ってくるまでに set や get などが行われるかで領域の移送が行われる。
+
+### 実験
+Debug 機能を使いながら命令を行うことで、さっきの条件の実験をおこなった。
+```
+=====> set hoge 0 0 4\n fuga
+
+(do_item_alloc)it->slabs_clsid: 1
+
+=====> get hoge
+
+item address: 0x7ffff43f5f70
+it->ITEM_clsid(it): 1
+it->slabs_clsid: 1
+resp->wbuf: VALUE hoge
+resp->wbuf: VALUE hoge 0 4
+
+In lru_pull_tail before:        key: hoge,      value: fuga
+,       it->slabs_clsid: 1
+In lru_pull_tail after: key: hoge,      value: fuga
+,       it->slabs_clsid: 129
+
+---> HOT -> COLD 領域に
+```
+get １回だけだと HOT からそのまま COLD 領域に
+
+```
+
+=====> set hoge 0 0 4\n fuga
+
+(do_item_alloc)it->slabs_clsid: 1
+
+=====> get hoge
+
+item address: 0x7ffff43f5f70
+it->ITEM_clsid(it): 1
+it->slabs_clsid: 1
+resp->wbuf: VALUE hoge
+resp->wbuf: VALUE hoge 0 4
+
+=====> get hoge
+
+item address: 0x7ffff43f5f70
+it->ITEM_clsid(it): 1
+it->slabs_clsid: 1
+resp->wbuf: VALUE hoge
+resp->wbuf: VALUE hoge 0 4
+
+In lru_pull_tail before:        key: hoge,      value: fuga
+,       it->slabs_clsid: 1
+In lru_pull_tail after: key: hoge,      value: fuga
+,       it->slabs_clsid: 65
+
+---> HOT -> WARM 領域に
+```
+
+2 回 get すると COLD 領域から WARM 領域に
+
+このまま WARM 領域のアイテムの推移を見てみる。
+```
+In lru_pull_tail before:        key: hoge,      value: fuga
+,       it->slabs_clsid: 65
+In lru_pull_tail after: key: hoge,      value: fuga
+,       it->slabs_clsid: 129
+```
+何もしないと WARM 領域から COLD 領域に
+```
+=====> get hoge
+
+item address: 0x7ffff43f5f70
+it->ITEM_clsid(it): 1
+it->slabs_clsid: 129
+resp->wbuf: VALUE hoge
+resp->wbuf: VALUE hoge 0 4
+
+=====> get hoge
+
+item address: 0x7ffff43f5f70
+it->ITEM_clsid(it): 1
+it->slabs_clsid: 129
+resp->wbuf: VALUE hoge
+resp->wbuf: VALUE hoge 0 4
+
+In lru_pull_tail before:        key: hoge,      value: fuga
+,       it->slabs_clsid: 129
+In lru_pull_tail after: key: hoge,      value: fuga
+,       it->slabs_clsid: 65
+```
+２回アクセスすると COLD から WARM 領域へ
