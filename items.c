@@ -370,6 +370,9 @@ item *do_item_alloc(char *key, const size_t nkey, const unsigned int flags,
         memcpy(ITEM_suffix(it), &flags, sizeof(flags));
     }
 
+    fprintf(stderr, "In do_item_alloc ITEM_key(it): %s\n", ITEM_key(it));
+    fprintf(stderr, "In do_item_alloc ITEM_data(it): %s\n", ITEM_data(it));
+
     /* Initialize internal chunk. */
     if (it->it_flags & ITEM_CHUNKED)
     {

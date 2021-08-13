@@ -2198,6 +2198,7 @@ static void process_update_command(conn *c, token_t *tokens, const size_t ntoken
     c->rlbytes = it->nbytes;
     c->cmd = comm;
     conn_set_state(c, conn_nread);
+    fprintf(stderr, "In end of process_update_command ITEM_data(it): %s\n", ITEM_data(it));
 }
 
 static void process_touch_command(conn *c, token_t *tokens, const size_t ntokens)
@@ -3046,6 +3047,59 @@ static void process_refresh_certs_command(conn *c, token_t *tokens, const size_t
 }
 #endif
 
+static void process_move_command(conn *c, token_t *tokens, const size_t ntokens)
+{
+    unsigned int id;
+    char *key;
+    size_t nkey;
+    // uint8_t nsuffix;
+    // uint32_t flags;
+    item *pre_it, *it;
+    key = tokens[KEY_TOKEN].value;
+    nkey = tokens[KEY_TOKEN].length;
+    char value[100];
+    char suffix[100];
+
+    /* 指定の item を get するための部分*/
+    pre_it = item_get(key, nkey, c, false);
+
+    fprintf(stderr, "In move command: key: %s,\tvalue: %s\n", ITEM_key(pre_it), ITEM_data(pre_it));
+
+    /* 指定の slabclass への alloc を行う */
+    if(!(safe_strtoul(tokens[2].value, &id))){
+        out_string(c, "CLIENT_ERROR bad command line format");
+        return;
+    }
+    fprintf(stderr, "In move command: id: %d\n", id);
+
+    it = do_item_alloc_pull(pre_it->nbytes, id);
+    fprintf(stderr, "In move command: it->nbytes: %d\n", it->nbytes);
+
+    /* LRU とハッシュからの削除と追加 */
+    it->slabs_clsid |= HOT_LRU; // 適当に HOT LRU に入れてみる
+    fprintf(stderr, "In move command: it->slabs_clsid: %d\n", it->slabs_clsid);
+
+        /* item の内容のコピー */
+    memcpy(it, pre_it, sizeof(item));
+    strcpy(value, ITEM_data(pre_it));
+    strcpy(suffix, ITEM_suffix(pre_it));
+
+    // おそらく、こいつらが hash から data を消す際に同じ key の data も初期化してしまう。
+    // そのため、削除した後に key と value をコピーしてあげないと、同じ key のものも消されてしまう
+    item_unlink(pre_it);
+    item_remove(pre_it);
+
+    memcpy(ITEM_key(it), key, nkey);
+    fprintf(stderr, "In process_move_command ITEM_key(it): %s\n", ITEM_key(it));
+    memcpy(ITEM_data(it), value, 100);
+    memcpy(ITEM_suffix(it), suffix, 100);
+
+    item_link(it);
+
+    fprintf(stderr, "In move command: ITEM_lruid(it): %d\n", ITEM_lruid(it));
+    fprintf(stderr, "In process_move_command ITEM_key(it): %s\n", ITEM_key(it));
+}
+
 // TODO: pipelined commands are incompatible with shifting connections to a
 // side thread. Given this only happens in two instances (watch and
 // lru_crawler metadump) it should be fine for things to bail. It _should_ be
@@ -3336,6 +3390,7 @@ static void process_command(conn *c, char *command)
     else if (strcmp(tokens[COMMAND_TOKEN].value, "move") == 0)
     {
         out_string(c, "move received");
+        process_move_command(c, tokens, ntokens);
     }
     else
     {
