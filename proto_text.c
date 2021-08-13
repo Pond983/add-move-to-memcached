@@ -3057,8 +3057,7 @@ static void process_move_command(conn *c, token_t *tokens, const size_t ntokens)
     item *pre_it, *it;
     key = tokens[KEY_TOKEN].value;
     nkey = tokens[KEY_TOKEN].length;
-    char value[100];
-    char suffix[100];
+    // char value[100];
 
     /* 指定の item を get するための部分*/
     pre_it = item_get(key, nkey, c, false);
@@ -3072,28 +3071,23 @@ static void process_move_command(conn *c, token_t *tokens, const size_t ntokens)
     }
     fprintf(stderr, "In move command: id: %d\n", id);
 
+    // 指定の slabclass から item のポインタをもらってくる
     it = do_item_alloc_pull(pre_it->nbytes, id);
     fprintf(stderr, "In move command: it->nbytes: %d\n", it->nbytes);
 
-    /* LRU とハッシュからの削除と追加 */
-    it->slabs_clsid |= HOT_LRU; // 適当に HOT LRU に入れてみる
-    fprintf(stderr, "In move command: it->slabs_clsid: %d\n", it->slabs_clsid);
-
-        /* item の内容のコピー */
+    /* item の内容のコピー */
     memcpy(it, pre_it, sizeof(item));
-    strcpy(value, ITEM_data(pre_it));
-    strcpy(suffix, ITEM_suffix(pre_it));
+    memcpy(ITEM_key(it), key, nkey);
+    strcpy(ITEM_data(it), ITEM_data(pre_it));
+    strcpy(ITEM_suffix(it), ITEM_suffix(pre_it));
 
-    // おそらく、こいつらが hash から data を消す際に同じ key の data も初期化してしまう。
-    // そのため、削除した後に key と value をコピーしてあげないと、同じ key のものも消されてしまう
+    /* LRU とハッシュからの削除 */
     item_unlink(pre_it);
     item_remove(pre_it);
 
-    memcpy(ITEM_key(it), key, nkey);
-    fprintf(stderr, "In process_move_command ITEM_key(it): %s\n", ITEM_key(it));
-    memcpy(ITEM_data(it), value, 100);
-    memcpy(ITEM_suffix(it), suffix, 100);
-
+    // 指定の lru に代入し、hash に追加
+    it->slabs_clsid = id | HOT_LRU; // 適当に HOT LRU に入れてみる
+    fprintf(stderr, "In move command: it->slabs_clsid: %d\n", it->slabs_clsid);
     item_link(it);
 
     fprintf(stderr, "In move command: ITEM_lruid(it): %d\n", ITEM_lruid(it));
