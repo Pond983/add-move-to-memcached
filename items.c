@@ -356,7 +356,10 @@ item *do_item_alloc(char *key, const size_t nkey, const unsigned int flags,
         id |= COLD_LRU;
     }
     it->slabs_clsid = id;
-    fprintf(stderr, "(do_item_alloc)it->slabs_clsid: %d\n", it->slabs_clsid);
+    if (DEBUG)
+    {
+        fprintf(stderr, "(do_item_alloc)it->slabs_clsid: %d\n", it->slabs_clsid);
+    }
 
     DEBUG_REFCNT(it, '*');
     it->it_flags |= settings.use_cas ? ITEM_CAS : 0;
@@ -370,8 +373,11 @@ item *do_item_alloc(char *key, const size_t nkey, const unsigned int flags,
         memcpy(ITEM_suffix(it), &flags, sizeof(flags));
     }
 
-    fprintf(stderr, "In do_item_alloc ITEM_key(it): %s\n", ITEM_key(it));
-    fprintf(stderr, "In do_item_alloc ITEM_data(it): %s\n", ITEM_data(it));
+    if (DEBUG)
+    {
+        fprintf(stderr, "In do_item_alloc ITEM_key(it): %s\n", ITEM_key(it));
+        fprintf(stderr, "In do_item_alloc ITEM_data(it): %s\n", ITEM_data(it));
+    }
 
     /* Initialize internal chunk. */
     if (it->it_flags & ITEM_CHUNKED)
@@ -685,7 +691,7 @@ char *item_cachedump(const unsigned int slabs_clsid, const unsigned int limit, u
     char key_temp[KEY_MAX_LENGTH + 1];
     char temp[512];
     unsigned int id = slabs_clsid;
-    
+
     id |= COLD_LRU;
 
     pthread_mutex_lock(&lru_locks[id]);
@@ -1430,11 +1436,17 @@ int lru_pull_tail(const int orig_id, const int cur_lru,
     {
         if (move_to_lru)
         {
-            fprintf(stderr, "In lru_pull_tail before:\tkey: %s,\tvalue: %s,\tit->slabs_clsid: %d\n", ITEM_key(it), ITEM_data(it), it->slabs_clsid);
+            if (DEBUG)
+            {
+                fprintf(stderr, "In lru_pull_tail before:\tkey: %s,\tvalue: %s,\tit->slabs_clsid: %d\n", ITEM_key(it), ITEM_data(it), it->slabs_clsid);
+            }
             it->slabs_clsid = ITEM_clsid(it);
             it->slabs_clsid |= move_to_lru;
             item_link_q(it);
-            fprintf(stderr, "In lru_pull_tail after:\tkey: %s,\tvalue: %s,\tit->slabs_clsid: %d\n", ITEM_key(it), ITEM_data(it), it->slabs_clsid);
+            if (DEBUG)
+            {
+                fprintf(stderr, "In lru_pull_tail after:\tkey: %s,\tvalue: %s,\tit->slabs_clsid: %d\n", ITEM_key(it), ITEM_data(it), it->slabs_clsid);
+            }
         }
         if ((flags & LRU_PULL_RETURN_ITEM) == 0)
         {
@@ -2116,11 +2128,11 @@ void lru_show(int slab_id, int item_num)
     {
         fprintf(stderr, "HOT: \n");
         it = heads[slab_id + HOT_LRU];
-        while (it != tails[slab_id + HOT_LRU]) 
+        while (it != tails[slab_id + HOT_LRU])
         {
             fprintf(stderr, "\tkey: %s,\tvalue: %s\n", ITEM_key(it), ITEM_data(it));
             it = it->next;
-        } 
+        }
         fprintf(stderr, "\tkey: %s,\tvalue: %s\n", ITEM_key(it), ITEM_data(it));
     }
 
@@ -2128,23 +2140,23 @@ void lru_show(int slab_id, int item_num)
     {
         fprintf(stderr, "WARM: \n");
         it = heads[slab_id + WARM_LRU];
-        while (it != tails[slab_id + WARM_LRU]) 
+        while (it != tails[slab_id + WARM_LRU])
         {
             fprintf(stderr, "\tkey: %s,\tvalue: %s\n", ITEM_key(it), ITEM_data(it));
             it = it->next;
-        } 
+        }
         fprintf(stderr, "\tkey: %s,\tvalue: %s\n", ITEM_key(it), ITEM_data(it));
     }
-    
+
     if (tails[slab_id + COLD_LRU] != 0)
     {
         fprintf(stderr, "COLD: \n");
         it = heads[slab_id + COLD_LRU];
-        while (it != tails[slab_id + COLD_LRU]) 
+        while (it != tails[slab_id + COLD_LRU])
         {
             fprintf(stderr, "\tkey: %s,\tvalue: %s\n", ITEM_key(it), ITEM_data(it));
             it = it->next;
-        } 
+        }
         fprintf(stderr, "\tkey: %s,\tvalue: %s\n", ITEM_key(it), ITEM_data(it));
     }
 }

@@ -2198,7 +2198,11 @@ static void process_update_command(conn *c, token_t *tokens, const size_t ntoken
     c->rlbytes = it->nbytes;
     c->cmd = comm;
     conn_set_state(c, conn_nread);
-    fprintf(stderr, "In end of process_update_command ITEM_data(it): %s\n", ITEM_data(it));
+
+    if (DEBUG)
+    {
+        fprintf(stderr, "In end of process_update_command ITEM_data(it): %s\n", ITEM_data(it));
+    }
 }
 
 static void process_touch_command(conn *c, token_t *tokens, const size_t ntokens)
@@ -3065,7 +3069,8 @@ static void process_move_command(conn *c, token_t *tokens, const size_t ntokens)
     fprintf(stderr, "In move command: key: %s,\tvalue: %s\n", ITEM_key(pre_it), ITEM_data(pre_it));
 
     /* 指定の slabclass への alloc を行う */
-    if(!(safe_strtoul(tokens[2].value, &id))){
+    if (!(safe_strtoul(tokens[2].value, &id)))
+    {
         out_string(c, "CLIENT_ERROR bad command line format");
         return;
     }
